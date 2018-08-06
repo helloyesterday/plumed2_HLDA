@@ -31,54 +31,53 @@
 
 //+PLUMEDOC DIMRED HLDA 
 /* 
-Time-lagged independent component analysis (HLDA) using a large number of collective variables as input.
+Harmonic linear discriminant analysis (HLDA) using a large number of collective variables as input.
 
-HLDA is a tools to look for the slowest decaying modes of the linear combination of input basis-set within a given lag time.
 The theory of HLDA can be found at paper:
-Yang, Y. I. and Parrinello, M. J. Chem. Theory Comput. 14, 2889 (2018) https://doi.org/10.1021/acs.jctc.8b00231
+Mendels, D, Piccini, GM and Parrinello, M. J. Phys. Chem. Lett. 9, 2776 (2018) https://doi.org/10.1021/acs.jpclett.8b00733
 
 \par Examples
 
 All the collective variables in PLUMED2 can be used as the basis-set. A simple example is as below,
-the cv1 and cv2 are setup as the basis-set of HLDA, the program with analysis
-the data from metadynamics simulaiton. It will analyze with the 100 different lag times from 0 to 500.
+three CVs: cv1, cv2 and cv3 are used as the basis-set of HLDA. There are the trajectories files colvar.1.data
+and colvar.2.data, which respond to two different states. The program with output every 5000 steps:
 
 \verbatim
-cv1: READ FILE=colvar.0.data VALUES=cv1 IGNORE_TIME
-cv2: READ FILE=colvar.0.data VALUES=cv1 IGNORE_TIME
-rbias: READ FILE=colvar.0.data VALUES=metad.rbias IGNORE_TIME
-rw: REWEIGHT_METAD TEMP=300
+s1cv1: READ FILE=colvar.1.data VALUES=cv1 IGNORE_TIME
+s1cv2: READ FILE=colvar.1.data VALUES=cv2 IGNORE_TIME
+s1cv3: READ FILE=colvar.1.data VALUES=cv3 IGNORE_TIME
+
+s2cv1: READ FILE=colvar.2.data VALUES=cv1 IGNORE_TIME
+s2cv2: READ FILE=colvar.2.data VALUES=cv2 IGNORE_TIME
+s2cv3: READ FILE=colvar.2.data VALUES=cv3 IGNORE_TIME
 
 HLDA ...
- ARG=cv1,cv2
- LAG_TIME=500
- TAU_NUMBER=100
- STEP_SIZE=0.2
- LOGWEIGHTS=rw
+ NUM=2
+ ARG1=s1cv1,s1cv2,s1cv3
+ ARG2=s2cv1,s2cv2,s2cv3
+ ARG_NUM=3
+ OUTPUT_STRIDE=5000
 ... HLDA
 \endverbatim
 
-Using plumed \ref driver to perform the analysis, then you will get the eigenvalues file (default name tica_eigenvalue.data) and
-eigenvectors (default name tica_eigenvector*.data) at different lag times.
-
-After using HLDA method, you will also get the correlation file (default name tica_correlation.data).
-If you have several parallel trajectories (such as using multiple walkers) to be analyze,
-this correlation file can be used as the restart file to analyze the next trajectory:
+You can also use linear discriminant analysis (LDA):
 
 \verbatim
-RESTART
+s1cv1: READ FILE=colvar.1.data VALUES=cv1 IGNORE_TIME
+s1cv2: READ FILE=colvar.1.data VALUES=cv2 IGNORE_TIME
+s1cv3: READ FILE=colvar.1.data VALUES=cv3 IGNORE_TIME
 
-cv1: READ FILE=colvar.1.data VALUES=cv1 IGNORE_TIME
-cv2: READ FILE=colvar.1.data VALUES=cv2 IGNORE_TIME
-rbias: READ FILE=colvar.1.data VALUES=metad.rbias IGNORE_TIME
-rw: REWEIGHT_METAD TEMP=330
+s2cv1: READ FILE=colvar.2.data VALUES=cv1 IGNORE_TIME
+s2cv2: READ FILE=colvar.2.data VALUES=cv2 IGNORE_TIME
+s2cv3: READ FILE=colvar.2.data VALUES=cv3 IGNORE_TIME
 
 HLDA ...
- ARG=cv1,cv2
- LAG_TIME=400
- TAU_NUMBER=100
- STEP_SIZE=0.2
- LOGWEIGHTS=rw
+ USE_LDA
+ NUM=2
+ ARG1=s1cv1,s1cv2,s1cv3
+ ARG2=s2cv1,s2cv2,s2cv3
+ ARG_NUM=3
+ OUTPUT_STRIDE=5000
 ... HLDA
 \endverbatim
 
