@@ -25,13 +25,9 @@
 #include "core/ActionRegister.h"
 #include "AverageVessel.h"
 #include "tools/IFile.h"
+#include "tools/Matrix.h"
 #include "reference/ReferenceConfiguration.h"
 #include "reference/ReferenceValuePack.h"
-
-#ifdef __PLUMED_HAS_ARMADILLO
-#include <armadillo>
-using namespace arma;
-#endif
 
 //+PLUMEDOC DIMRED HLDA 
 /* 
@@ -102,6 +98,8 @@ private:
 	unsigned irecord;
 	unsigned ncomp;
 	
+	bool use_lda;
+	
 	std::string avg_file;
 	std::string cov_file;
 	std::string mat_file;
@@ -146,6 +144,7 @@ void HLDA::registerKeywords( Keywords& keys ){
 	keys.add("compulsory","HLDA_MATRIX_FILE","hlda_matrix.data","the file to output the final matrix");
 	keys.add("compulsory","EIGENVECTOR_FILE","hlda_eigenvector","the file to output the result");
 	keys.add("compulsory","EIGENVALUE_FILE","hlda_eigenvalue.data","the file to output the eigen value");
+	keys.addFlag("USE_LDA",false,"use LDA instead of HLDA");
 	keys.add("optional","EIGEN_NUMBERS","how many eigenvectors to be output (from large to small)");
 }
 
@@ -192,6 +191,8 @@ irecord(0)
 	parse("EIGEN_NUMBERS",ncomp);
 	plumed_massert(ncomp>0,"the EIGEN_NUMBER must be larger than 0!");
 	plumed_massert(ncomp<=_narg,"the EIGEN_NUMBER cannot be larger than the number of CVs!");
+	
+	parseFlag("USE_LDA",use_lda);
 
 	checkRead();
 	
@@ -200,7 +201,7 @@ irecord(0)
 	log.printf("  with output stride: %d.\n",output_steps);
 	log.printf("  with average output file: %s\n",avg_file.c_str());
 	log.printf("  with correlation output file: %s\n",cov_file.c_str());
-	log<<"  Bibliography "<<plumed.cite("Dan, Piccini and Parrinello, J. Phys. Chem. Lett. 9, 2776 (2018)");
+	log<<"  Bibliography "<<plumed.cite("Mendels, Piccini and Parrinello, J. Phys. Chem. Lett. 9, 2776 (2018)");
 	log<<"\n";
 }
 
@@ -292,77 +293,148 @@ void HLDA::performAnalysis()
 	omat.printField("NPOINTS",int(irecord));
 	omat.addConstantField("STEP");
 	
-	std::vector<std::vector<colvec> > eigvec_points;
+	std::vector<double> max_value(_narg,0);
+	std::vector<unsigned> max_ids(_narg,0);
+	std::vector<std::vector<std::vector<double> > > eigvec_points;
 	for(unsigned ir=0;ir!=irecord;++ir)
 	{
-		std::vector<vec> mux;
-		vec mu_avg(_narg,fill::zeros);
+		log.printf("  Setp: %d\n",int(record_steps[ir]));
+		std::vector<std::vector<double> > mux;
+		//~ vec mu_avg(_narg,fill::zeros);
+		std::vector<double> mu_avg(_narg,0);
 		
-		mat cov_inv(_narg,_narg,fill::zeros);
+		//~ mat cov_inv(_narg,_narg,fill::zeros);
+		Matrix<double> cov_inv(_narg,_narg);
+		Matrix<double> within_class(_narg,_narg);
+		for(unsigned i=0;i!=_narg;++i)
+		{
+			for(unsigned j=0;j!=_narg;++j)
+			{
+				cov_inv[i][j]=0;
+				within_class[i][j]=0;
+			}
+		}
+		
 		for(unsigned is=0;is!=getNumberOfStates();++is)
 		{
-			vec mu0=vec(record_avg[ir][is]);
-			mu_avg+=mu0;
+			const std::vector<double>& mu0=record_avg[ir][is];
+			const std::vector<double>& cov0=record_cov[ir][is];
 			mux.push_back(mu0);
 			
 			unsigned cid=0;
-			mat mc(_narg,_narg);
+			Matrix<double> mc(_narg,_narg);
 			for(unsigned i=0;i!=_narg;++i)
 			{
+				mu_avg[i]+=mu0[i];
 				for(unsigned j=0;j!=i+1;++j)
 				{
-					double vcov=record_cov[ir][is][cid++];
-					mc(i,j)=vcov;
+					double vcov=cov0[cid++];
+					mc[i][j]=vcov;
 					if(i!=j)
-						mc(j,i)=vcov;
+						mc[j][i]=vcov;
 				}
 			}
-			cov_inv+=inv(mc);
-		}
-		mu_avg/=getNumberOfStates();
-		
-		mat within_class(_narg,_narg,fill::zeros);
-		for(unsigned is=0;is!=getNumberOfStates();++is)
-		{
-			vec mu0m=mux[is]-mu_avg;
-			mat mu_mat(_narg,_narg);
+			Matrix<double> imc(_narg,_narg);
+			if(use_lda)
+				imc=mc;
+			else
+				Invert(mc,imc);
+
 			for(unsigned i=0;i!=_narg;++i)
 			{
 				for(unsigned j=0;j!=_narg;++j)
-					mu_mat(i,j)=mu0m(i)*mu0m(j);
+					cov_inv[i][j]+=imc[i][j];
 			}
-			within_class+=mu_mat;
+		}
+		for(unsigned i=0;i!=_narg;++i)
+			mu_avg[i]/=getNumberOfStates();
+		
+		if(use_lda)
+		{
+			Matrix<double> tmp_cov;
+			Invert(cov_inv,tmp_cov);
+			cov_inv=tmp_cov;
+		}
+		
+		for(unsigned is=0;is!=getNumberOfStates();++is)
+		{
+			std::vector<double> mu0m(mux[is]);
+			for(unsigned i=0;i!=_narg;++i)
+				mu0m[i]-=mu_avg[i];
+
+			for(unsigned i=0;i!=_narg;++i)
+			{
+				for(unsigned j=0;j!=_narg;++j)
+					within_class[i][j]+=mu0m[i]*mu0m[j];
+			}
 		}
 
-		mat tot_class=cov_inv*within_class;
+		Matrix<double> tot_class;
+		mult(cov_inv,within_class,tot_class);
 
 		omat.printField("STEP",int(record_steps[ir]));
 		for(unsigned i=0;i!=_narg;++i)
 		{
 			omat.printField("MATRIX",row_args[i]);
 			for(unsigned j=0;j!=_narg;++j)
-				omat.printField(col_args[j],tot_class(i,j));
+				omat.printField(col_args[j],cov_inv[i][j]);
+			omat.printField();
+		}
+		omat.flush();
+			omat.printField("STEP",int(record_steps[ir]));
+		for(unsigned i=0;i!=_narg;++i)
+		{
+			omat.printField("MATRIX",row_args[i]);
+			for(unsigned j=0;j!=_narg;++j)
+				omat.printField(col_args[j],within_class[i][j]);
 			omat.printField();
 		}
 		omat.flush();
 		
-		cx_vec wt;
-		cx_mat vt;
-		eig_gen(wt,vt,tot_class);
+		std::vector<double> wtr,wti;
+		Matrix<double> lvtr,lvti,rvtr,rvti;
 		
-		vec rwt=arma::real(wt);
-		mat rvt=arma::real(vt);
-		std::multimap<double,colvec> eigs0;
+		//~ eig_gen(wt,vt,tot_class);
+		diagGenMat(tot_class,wtr,wti,lvtr,lvti,rvtr,rvti);
+		
+		std::multimap<double,std::vector<double> > eigs0;
 
 		for(unsigned i=0;i!=_narg;++i)
-			eigs0.insert(std::pair<double,colvec>(rwt[i],rvt.col(i)));
+		{
+			std::vector<double> rowvec;
+			for(unsigned j=0;j!=_narg;++j)
+				rowvec.push_back(rvtr[i][j]);
+			eigs0.insert(std::pair<double,std::vector<double> >(wtr[i],rowvec));
+		}
 
 		std::vector<double> eigval0;
-		std::vector<colvec> eigvec0;
-		for(std::multimap<double,colvec>::reverse_iterator i=eigs0.rbegin();i!=eigs0.rend();++i)
+		std::vector<std::vector<double> > eigvec0;
+		
+		for(std::multimap<double,std::vector<double> >::reverse_iterator i=eigs0.rbegin();i!=eigs0.rend();++i)
 		{
 			eigval0.push_back(i->first);
 			eigvec0.push_back(i->second);
+		}
+		
+		for(unsigned i=0;i!=_narg;++i)
+		{
+			double max=0;
+			unsigned max_id=_narg;
+			for(unsigned j=0;j!=_narg;++j)
+			{
+				if(fabs(eigvec0[i][j])>max)
+				{
+					max=fabs(eigvec0[i][j]);
+					max_id=j;
+				}
+			}
+			max_ids[i]=max_id;
+			if(ir>0&&(eigvec0[i][max_id]*eigvec_points.back()[i][max_id]<0))
+			{
+				for(unsigned j=0;j!=_narg;++j)
+					eigvec0[i][j]*=-1;
+			}
+			max_value[i]=eigvec0[i][max_id];
 		}
 		
 		eigvec_points.push_back(eigvec0);
@@ -386,6 +458,7 @@ void HLDA::performAnalysis()
 	}
 	oeigval.close();
 	omat.close();
+	
 	for(unsigned i=0;i!=ncomp;++i)
 	{
 		OFile oeigvec;
@@ -399,10 +472,12 @@ void HLDA::performAnalysis()
 		oeigvec.fmtField(" %e");
 		for(unsigned j=0;j!=eigvec_points.size();++j)
 		{
-			oeigvec.printField("LAG_TIME",int(record_steps[j]));
+			oeigvec.printField("STEP",int(record_steps[j]));
 			for(unsigned k=0;k!=_narg;++k)
 			{
 				double vvec=eigvec_points[j][i][k];
+				if(max_value[i]<0)
+					vvec*=-1;
 				std::string id;
 				Tools::convert(k,id);
 				std::string eigid="EIGVEC"+id;
