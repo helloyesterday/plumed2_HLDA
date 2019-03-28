@@ -73,9 +73,12 @@ class Matrix:
   template <typename U> friend void matrixOut( Log&, const Matrix<U>& );
   /// Diagonalize a symmetric matrix - returns zero if diagonalization worked
   template <typename U> friend int diagMat( const Matrix<U>&, std::vector<double>&, Matrix<double>& );
+  
+#ifdef __PLUMED_HAS_EXTERNAL_LAPACK
   /// Diagonalize a general matrix - returns zero if diagonalization worked
   template <typename U> friend int diagGenMat( const Matrix<U>&,
   std::vector<double>&, std::vector<double>&,Matrix<double>&, Matrix<double>&, Matrix<double>&, Matrix<double>&);
+#endif
   /// Calculate the Moore-Penrose Pseudoinverse of a matrix
   template <typename U> friend int pseudoInvert( const Matrix<U>&, Matrix<double>& );
   /// Calculate the logarithm of the determinant of a symmetric matrix - returns zero if succesfull
@@ -266,6 +269,7 @@ template <typename T> int diagMat( const Matrix<T>& A, std::vector<double>& eige
   return 0;
 }
 
+#ifdef __PLUMED_HAS_EXTERNAL_LAPACK
 template <typename T> int diagGenMat( const Matrix<T>& A,
   std::vector<double>& eigenvals_real, std::vector<double>& eigenvals_imag,
   Matrix<double>& lefteigenvecs_real,Matrix<double>& lefteigenvecs_imag,
@@ -344,6 +348,7 @@ template <typename T> int diagGenMat( const Matrix<T>& A,
   //~ }
   return 0;
 }
+#endif
 
 template <typename T> int pseudoInvert( const Matrix<T>& A, Matrix<double>& pseudoinverse ) {
   std::vector<double> da(A.sz);
